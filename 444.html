@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Succinct Snake Game</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #FF007A; /* Pink background for the entire webpage */
+            color: #fff;
+            font-family: Arial, sans-serif;
+        }
+        h1 {
+            color: #ffffff;
+            margin-bottom: 10px;
+        }
+        #gameCanvas {
+            border: 2px solid #ff007a;
+            background: linear-gradient(45deg, #111, #333);
+            display: none;
+        }
+        #starDisplay {
+            font-size: 24px;
+            margin: 10px 0;
+            display: none;
+        }
+        button {
+            background-color: #ff007a;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        button:hover {
+            background-color: #e6006d;
+        }
+        #rulesScreen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.9);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+        }
+        #rulesScreen h2 {
+            color: #ff007a;
+            font-size: 2em;
+            margin-bottom: 20px;
+        }
+        #rulesScreen ul {
+            list-style-type: none;
+            padding: 0;
+            margin: 0 0 20px 0;
+            text-align: left;
+            max-width: 400px;
+        }
+        #rulesScreen li {
+            font-size: 1.2em;
+            margin-bottom: 10px;
+        }
+        #rulesScreen button {
+            font-size: 1.2em;
+            padding: 15px 30px;
+        }
+        #walletAddress {
+            font-size: 16px;
+            margin-top: 10px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <!-- Rules Screen -->
+    <div id="rulesScreen">
+        <h2>Succinct Snake Game Rules</h2>
+        <ul>
+            <li><strong>Move the Snake:</strong> Use the arrow keys (Up, Down, Left, Right) to control the snake’s direction.</li>
+            <li><strong>Collect Stars:</strong> Eat the white food to gain 1 star.</li>
+            <li><strong>Diamond Bonus:</strong> After collecting 20 stars, a diamond appears. Eat it to slow down the snake for 5 seconds.</li>
+            <li><strong>100 Star Bonus:</strong> After collecting 100 stars, you get a 5% bonus on your total stars!</li>
+            <li><strong>Avoid Collisions:</strong> Don’t hit the walls or the snake’s own body, or the game will end.</li>
+            <li><strong>Game Over:</strong> The game ends if you crash, and you’ll see your total stars.</li>
+        </ul>
+        <button id="rulesStartButton">Start Game</button>
+    </div>
+
+    <!-- Game Interface -->
+    <h1 id="gameTitle" style="display:none;">Succinct Snake Game</h1>
+    <canvas id="gameCanvas" width="400" height="400"></canvas>
+    <div id="starDisplay" style="display:none;">Star: 0</div>
+
+    <!-- MetaMask Connect Button and Wallet Display -->
+    <script src="https://cdn.ethers.io/lib/ethers-5.7.2.umd.min.js"></script>
+    <button id="connectButton" style="background-color: #ff007a; color: #fff; border: none; padding: 10px 20px; font-size: 16px; cursor: pointer; border-radius: 5px; margin-top: 10px;">Connect MetaMask</button>
+    <div id="walletAddress" style="display: none;">Connected Wallet: <span id="addressText"></span></div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const starDisplay = document.getElementById('starDisplay');
+        const rulesScreen = document.getElementById('rulesScreen');
+        const rulesStartButton = document.getElementById('rulesStartButton');
+        const gameTitle = document.getElementById('gameTitle');
+
+        // Game settings
+        const gridSize = 20;
+        const tileCount = canvas.width / gridSize;
+        let snake = [{ x: 10, y: 10 }];
+        let food = { x: 15, y: 15 };
+        let diamond = { x: -1, y: -1, visible: false };
+        let dx = 0;
+        let dy = 0;
+        let stars = 0;
+        let baseGameSpeed = 100;
+        let gameSpeed = baseGameSpeed;
+        let gameRunning = false;
+        let gameLoopInterval = null;
+        let bonusApplied = false; // Flag to check if bonus has been applied
+
+        // Show rules screen initially
+        rulesScreen.style.display = "flex";
+
+        // Start the game when the rules screen Start button is clicked
+        rulesStartButton.addEventListener('click', () => {
+            // Hide the rules screen and show the game
+            rulesScreen.style.display = "none";
+            gameTitle.style.display = "block";
+            canvas.style.display = "block";
+            starDisplay.style.display = "block";
+
+            // Focus on canvas for keyboard controls
+            canvas.setAttribute('tabindex', '0');
+            canvas.focus();
+
+            // Start the game loop
+            if (!gameRunning) {
+                gameRunning = true;
+                startGameLoop();
+            }
+        });
+
+        // Start the game loop
+        function startGameLoop() {
+            gameLoopInterval = setInterval(() => {
+                if (!gameRunning) {
+                    clearInterval(gameLoopInterval);
+                    return;
+                }
+                updateSnake();
+                drawGame();
+            }, gameSpeed);
+        }
+
+        // Update snake position
+        function updateSnake() {
+            const head = { x: snake[0].x + dx, y: snake[0].y + dy };
+
+            // Check for collisions with walls
+            if (head.x < 0 || head.x >= tileCount || head.y < 0 || head.y >= tileCount) {
+                resetGame();
+                return;
+            }
+
+            // Check for collisions with self
+            for (let i = 1; i < snake.length; i++) {
+                if (head.x === snake[i].x && head.y === snake[i].y) {
+                    resetGame();
+                    return;
+                }
+            }
+
+            snake.unshift(head);
+
+            // Check if food is eaten
+            if (head.x === food.x && head.y === food.y) {
+                stars += 1;
+                starDisplay.textContent = `Star: ${stars}`;
+                spawnFood();
+
+                // Spawn diamond after 20 stars
+                if (stars % 20 === 0) {
+                    spawnDiamond();
+                }
+
+                // Apply bonus after 100 stars
+                if (stars >= 100 && !bonusApplied) {
+                    applyBonus();
+                }
+            } else if (diamond.visible && head.x === diamond.x && head.y === diamond.y) {
+                diamond.visible = false;
+                slowDownSnake();
+            } else {
+                snake.pop();
+            }
+        }
+
+        // Apply bonus after 100 stars
+        function applyBonus() {
+            // Apply a 5% bonus to total stars
+            const bonus = Math.floor(stars * 0.05);
+            stars += bonus;
+            starDisplay.textContent = `Star: ${stars}`;
+            bonusApplied = true;
+        }
+
+        // Slow down snake for 5 seconds after diamond is eaten
+        function slowDownSnake() {
+            clearInterval(gameLoopInterval);
+            gameSpeed = 300;
+            gameLoopInterval = setInterval(() => {
+                if (!gameRunning) {
+                    clearInterval(gameLoopInterval);
+                    return;
+                }
+                updateSnake();
+                drawGame();
+            }, gameSpeed);
+
+            setTimeout(() => {
+                gameSpeed = baseGameSpeed;
+                clearInterval(gameLoopInterval);
+                gameLoopInterval = setInterval(() => {
+                    if (!gameRunning) {
+                        clearInterval(gameLoopInterval);
+                        return;
+                    }
+                    updateSnake();
+                    drawGame();
+                }, gameSpeed);
+            }, 5000);
+        }
+
+        // Draw the game elements
+        function drawGame() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw snake with the previous color (pink)
+            ctx.fillStyle = '#FF007A'; // Snake body color (pink)
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = 'rgba(255, 0, 122, 0.7)'; // Add pink shadow to snake
+            for (let i = 0; i < snake.length; i++) {
+                // Draw each segment with rounded corners
+                ctx.beginPath();
+                ctx.arc(snake[i].x * gridSize + gridSize / 2, snake[i].y * gridSize + gridSize / 2, gridSize / 2, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.shadowBlur = 0; // Reset shadow
+
+            // Draw food (circle for simplicity)
+            ctx.fillStyle = "#fff";
+            ctx.beginPath();
+            ctx.arc(food.x * gridSize + gridSize / 2, food.y * gridSize + gridSize / 2, gridSize / 2, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Draw diamond as a real diamond shape (regular polygon with 4 sides)
+            if (diamond.visible) {
+                ctx.fillStyle = "#00ffff";
+                ctx.beginPath();
+                const diamondX = diamond.x * gridSize + gridSize / 2;
+                const diamondY = diamond.y * gridSize + gridSize / 2;
+                const size = gridSize / 2;
+                ctx.moveTo(diamondX, diamondY - size);
+                ctx.lineTo(diamondX + size, diamondY);
+                ctx.lineTo(diamondX, diamondY + size);
+                ctx.lineTo(diamondX - size, diamondY);
+                ctx.closePath();
+                ctx.fill();
+            }
+        }
+
+        // Spawn new food
+        function spawnFood() {
+            food.x = Math.floor(Math.random() * tileCount);
+            food.y = Math.floor(Math.random() * tileCount);
+
+            snake.forEach(segment => {
+                if (food.x === segment.x && food.y === segment.y) {
+                    spawnFood();
+                }
+            });
+
+            if (diamond.visible && food.x === diamond.x && food.y === diamond.y) {
+                spawnFood();
+            }
+        }
+
+        // Spawn a diamond after 20 stars
+        function spawnDiamond() {
+            diamond.x = Math.floor(Math.random() * tileCount);
+            diamond.y = Math.floor(Math.random() * tileCount);
+
+            diamond.visible = true;
+        }
+
+        // Reset the game
+        function resetGame() {
+            alert(`Game Over! Your stars: ${stars}`);
+            gameRunning = false;
+            clearInterval(gameLoopInterval);
+            snake = [{ x: 10, y: 10 }];
+            dx = 0;
+            dy = 0;
+            stars = 0;
+            bonusApplied = false;
+            diamond.visible = false;
+            starDisplay.textContent = `Star: ${stars}`;
+            spawnFood();
+
+            // Show the rules screen again
+            rulesScreen.style.display = "flex";
+            gameTitle.style.display = "none";
+            canvas.style.display = "none";
+            starDisplay.style.display = "none";
+        }
+
+        // Handle keyboard controls
+        document.addEventListener('keydown', event => {
+            if (!gameRunning) return;
+
+            switch (event.key) {
+                case 'ArrowUp':
+                    if (dy !== 1) { dx = 0; dy = -1; }
+                    break;
+                case 'ArrowDown':
+                    if (dy !== -1) { dx = 0; dy = 1; }
+                    break;
+                case 'ArrowLeft':
+                    if (dx !== 1) { dx = -1; dy = 0; }
+                    break;
+                case 'ArrowRight':
+                    if (dx !== -1) { dx = 1; dy = 0; }
+                    break;
+            }
+        });
+
+        // Initialize game (initial draw)
+        spawnFood();
+        drawGame();
+
+        // MetaMask Connection Add-On
+        const connectButton = document.getElementById('connectButton');
+        const walletAddressDiv = document.getElementById('walletAddress');
+        const addressText = document.getElementById('addressText');
+        const sepoliaChainId = '0xaa36a7'; // Sepolia chain ID in hex
+        let provider, signer, connectedAddress;
+
+        // Connect MetaMask and display wallet address
+        async function connectMetaMask() {
+            if (typeof window.ethereum === 'undefined') {
+                alert('Please install MetaMask to connect your wallet!');
+                return;
+            }
+
+            try {
+                // Request account access
+                const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
+                provider = new ethers.providers.Web3Provider(window.ethereum);
+                signer = provider.getSigner();
+                connectedAddress = accounts[0]; // Get the first connected account
+
+                // Check if connected to Sepolia
+                const network = await provider.getNetwork();
+                if (network.chainId !== parseInt(sepoliaChainId, 16)) {
+                    try {
+                        await ethereum.request({
+                            method: 'wallet_switchEthereumChain',
+                            params: [{ chainId: sepoliaChainId }],
+                        });
+                    } catch (switchError) {
+                        if (switchError.code === 4902) {
+                            await ethereum.request({
+                                method: 'wallet_addEthereumChain',
+                                params: [{
+                                    chainId: sepoliaChainId,
+                                    chainName: 'Sepolia Test Network',
+                                    rpcUrls: ['https://rpc.sepolia.org'],
+                                    nativeCurrency: { name: 'Sepolia ETH', symbol: 'ETH', decimals: 18 },
+                                    blockExplorerUrls: ['https://sepolia.etherscan.io']
+                                }],
+                            });
+                        } else {
+                            throw switchError;
+                        }
+                    }
+                }
+
+                // Update UI to show connected wallet
+                connectButton.textContent = "Connected";
+                connectButton.disabled = true; // Disable button after connection
+                walletAddressDiv.style.display = "block";
+                addressText.textContent = connectedAddress;
+                alert(`Connected to MetaMask! Wallet: ${connectedAddress}`);
+            } catch (error) {
+                alert(`Connection Error: ${error.message}`);
+            }
+        }
+
+        // Event listener for connect button
+        connectButton.addEventListener('click', connectMetaMask);
+    </script>
+</body>
+</html>
